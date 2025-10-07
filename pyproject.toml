@@ -1,0 +1,70 @@
+[project]
+name = "ssdd"
+version = "1.0.0"
+description = "SSDD: "
+authors = [{name = "Fundamental AI Research - Meta"}]
+requires-python = ">=3.11"
+readme = "README.md"
+
+
+dependencies = [
+    "einops",
+    "safetensors",
+]
+
+[project.optional-dependencies]
+demo = [
+    "jupyterlab",
+    "ipywidgets",
+    "matplotlib",
+]
+
+dev = [
+    "numpy",
+    "matplotlib",
+    "tensorboard",
+    "jupyterlab",
+    "jupytext",
+    "ipywidgets",
+    "pre-commit",
+    "hydra-core",
+    "hydra-colorlog",
+    "tqdm",
+    "accelerate",
+    "torcheval-nightly",
+    "better-exceptions",
+    "torchmetrics",
+    "schedulefree",
+    "diffusers",
+    "transformers",
+    "dreamsim",
+    "torch_fidelity",
+    "lpips",
+    "scikit-image",
+    "pyre_extensions",
+]
+
+[tool.setuptools]
+packages = ["ssdd"]
+
+[build-system]
+requires = ["setuptools"]
+
+[tool.ruff]
+line-length = 196
+indent-width = 4
+exclude = [
+    "*.ipynb",
+    "notebooks/",
+    "__local__/",
+    "wandb/",
+]
+lint.extend-select = ["I"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pyrefly]
+project-includes = ["**/*"]
+project-excludes = ["**/*venv/**/*"]

@@ -1,0 +1,2 @@
+[MESSAGES CONTROL]
+disable=protected-access,f-string-without-interpolation,redefined-builtin,assignment-from-none,relative-beyond-top-level
