@@ -294,9 +294,9 @@ class AutoencodingTasks:
         if "teacher" in self.models:
             # Train on distillation
             with torch.no_grad():
-                teacher_gen = self.models["teacher"](x)
-            target_x = teacher_gen.x0_pred
-            ssdd_out = self.models["ae"](target_x, z=teacher_gen.z, noise=teacher_gen.noise)
+                self.models["teacher"].eval()
+                target_x, z, noise = self.models["teacher"](x, as_teacher=True)
+            ssdd_out = self.models["ae"](target_x, z=z, noise=noise, from_noise=True)
         else:
             # Train on target
             ssdd_out = self.models["ae"](x)

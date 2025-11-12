@@ -164,8 +164,11 @@ def load_submodule(model, weights_path, module_name, strict=True, accelerator=No
     warn = accelerator.warning if accelerator else lambda x: print("[WARNING", x)
     assert isinstance(weights_path, (str, Path))
     if len(Path(weights_path).parts) == 1:
+        model_type = "last"
+        if "@" in weights_path:
+            weights_path, model_type = str(weights_path).split("@", 1)
         ckpt_path = TaskState().cfg.ckpt_dir
-        weights_path = Path(ckpt_path) / "jobs" / str(weights_path) / "checkpoints" / "best" / f"model_{default_load}.safetensors"
+        weights_path = Path(ckpt_path) / "jobs" / str(weights_path) / "checkpoints" / model_type / f"model_{default_load}.safetensors"
 
     weights = safe_load_file(weights_path)
 

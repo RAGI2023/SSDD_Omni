@@ -143,39 +143,41 @@ accelerate launch ssdd/main.py run_name=train_enc_f8c4 \
 Stage 1 training: shared pre-training of a model at resolution $128\times 128$ with data augmentation
 ```bash
 accelerate launch ssdd/main.py run_name=f8c4_M_pretrain \
-    dataset.im_size=128 dataset.aug_scale=2 ssdd.encoder_checkpoint=train_enc_f8c4
+    dataset.im_size=128 dataset.aug_scale=2 training.lr=8e-4 ssdd.encoder_checkpoint=train_enc_f8c4
 ```
+
+*Note: the learning rate is set to 8e-4. For models of size H, XH or G, it is recommended to decrease to `training.lr=3e-4` for stability.*
 
 
 Stage 2: Finetune model at $128x128$
 ```bash
 accelerate launch ssdd/main.py run_name=f8c4_M_128 \
-    training.epochs=200 dataset.im_size=128 training.lr=1e-4 ssdd.checkpoint=f8c4_M_pretrain
+    training.epochs=100 dataset.im_size=128 training.lr=1e-4 ssdd.checkpoint=f8c4_M_pretrain
 ```
 
 Stage 2: Finetune model at $256x256$
 ```bash
 accelerate launch ssdd/main.py run_name=f8c4_M_256 \
-    training.epochs=200 dataset.im_size=256 training.lr=1e-4 ssdd.checkpoint=f8c4_M_pretrain
+    training.epochs=100 dataset.im_size=256 training.lr=1e-4 ssdd.checkpoint=f8c4_M_pretrain
 ```
 
 Distillation of a model into a single-step decoder
 ```bash
 accelerate launch ssdd/main.py run_name=f8c4_M_128_distill \
     training.epochs=10 training.eval_freq=1 dataset.im_size=128 training.lr=1e-4 \
-    ssdd.checkpoint=f8c4_M_128 ssdd.fm_sampler.steps=7 distill_teacher=true
+    ssdd.checkpoint=f8c4_M_128@best ssdd.fm_sampler.steps=12 distill_teacher=true
 ```
 
 ### Evaluating models
 
 Evaluation of multi-steps model
 ```bash
-accelerate launch ssdd/main.py task=eval dataset.im_size=128 ssdd.checkpoint=f8c4_M_128 ssdd.fm_sampler.steps=8
+accelerate launch ssdd/main.py task=eval dataset.im_size=128 ssdd.checkpoint=f8c4_M_128@best ssdd.fm_sampler.steps=8
 ```
 
 Evaluation of a singl-step model (distilled)
 ```bash
-accelerate launch ssdd/main.py task=eval dataset.im_size=128 ssdd.checkpoint=f8c4_M_128_distill ssdd.fm_sampler.steps=1
+accelerate launch ssdd/main.py task=eval dataset.im_size=128 ssdd.checkpoint=f8c4_M_128_distill@best ssdd.fm_sampler.steps=1
 ```
 
 Computing the mean / variance of the encoded features.
@@ -192,7 +194,7 @@ Main arguments:
 - `task=train` / `task=eval`: selects the task to run. *Default: `train`.*
 - `dataset.im_size=<128/256/512>`: sets the image size used for training and evaluation.
 - `ssdd.encoder=f<?>c<?>`: sets the encoder resolution. The `f` value is the patch resolution, the `c` value is the latent channel dimension. *Default: `f8c4`.*
-- `ssdd.decoder=<S/B/M/L/XL/H>`: sets the decoder size. *Defaults: `M`.*
+- `ssdd.decoder=<XS/S/B/M/L/XL/H>`: sets the decoder size. *Defaults: `M`.*
 - `ssdd.checkpoint=<...>`: loads the model weights from a pre-trained checkpoint. Can be either the name of a previous run (set by `run_name`), or an absolute path.
 - `ssdd.fm_sampler.steps=<...>`: number of steps for sampling, used both for evaluation tasks and evaluation during training. Should be set to `1` to evaluate single-step models. *Default: `8`.*
     - During distillation process, this is the number of steps for the *teacher* model.

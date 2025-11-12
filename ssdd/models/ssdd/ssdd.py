@@ -102,6 +102,8 @@ class SSDD(nn.Module):
         steps: Optional[int] = None,
         noise: Optional[torch.Tensor] = None,
         z: Optional[torch.Tensor] = None,
+        from_noise=False,
+        as_teacher=False,
     ) -> Union[torch.Tensor, TrainStepResult]:
         # Encoder
         encoded = None
@@ -115,12 +117,20 @@ class SSDD(nn.Module):
 
         # Decoder
         if not self.training:
-            return self.decode(z, steps=steps, noise=noise)
+            if as_teacher:
+                if noise is None:
+                    noise = torch.randn_like(gt_x)
+            x_gen = self.decode(z, steps=steps, noise=noise)
+            if as_teacher:
+                return x_gen, z, noise
+            return x_gen
         else:
             t = self.fm_trainer.sample_t(gt_x.shape[0], device=gt_x.device)
+            if from_noise:
+                t = torch.ones_like(t)
 
             # Use decoder to get a diffusion reconstruction loss
-            diff_loss, (x_t, noise, noise_t, v_pred) = self.fm_trainer.loss(self.decoder, x=gt_x, t=t, fn_kwargs={"z": z})
+            diff_loss, (x_t, noise, noise_t, v_pred) = self.fm_trainer.loss(self.decoder, x=gt_x, t=t, fn_kwargs={"z": z}, noise=noise)
 
             # Compute auxiliary losses
             x0_pred = self.fm_trainer.step(x_t, v_pred, noise_t)

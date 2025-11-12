@@ -50,8 +50,8 @@ ssdd:
   decoder: M
 
   fm_sampler:
-    steps: 10
-    t_pow_shift: 4.0
+    steps: 12
+    t_pow_shift: 2.0
 
   ema:
     decay: 0.999
@@ -77,8 +77,8 @@ training:
   save_on_best: FID
   log_freq: 200
 
-  lr: 3e-4
-  weight_decay: 1e-3
+  lr: 8e-4
+  weight_decay: 1e-2
 
 losses:
   diffusion: 1
