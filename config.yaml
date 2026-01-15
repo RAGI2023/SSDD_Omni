@@ -1,0 +1,59 @@
+seed: 0
+task: train
+runtime_path: ${hydra:runtime.cwd}
+ckpt_dir: ${runtime_path}/runs
+run_name: multiview_bs16
+cache_dir: ${ckpt_dir}/cache
+run_dir: ${ckpt_dir}/jobs/${run_name}
+checkpoint_path: ${run_dir}/checkpoints
+dataset:
+  imagenet_root: /data/360SP-data
+  im_size: 128
+  batch_size: 16
+  aug_scale: null
+  limit: null
+  return_all_views: true
+  f_pix: 220.0
+  xi: 0.9
+  mask_mode: inscribed
+distill_teacher: false
+ssdd:
+  compile: false
+  checkpoint: null
+  encoder: f8c4
+  encoder_checkpoint: null
+  encoder_train: false
+  decoder: M
+  n_views: 4
+  fusion_type: concat_conv
+  fusion_hidden_dim: null
+  use_view_encoding: true
+  view_encoding_type: sinusoidal
+  fm_sampler:
+    steps: 12
+    t_pow_shift: 2.0
+  ema:
+    decay: 0.999
+    start_iter: 50000
+aux_losses:
+  compile: ${ssdd.compile}
+  repa:
+    i_extract: 4
+    n_layers: 2
+  lpips: true
+training:
+  mixed_precision: bf16
+  grad_accumulate: 1
+  grad_clip: 0.1
+  epochs: 100
+  eval_freq: 4
+  save_on_best: FID
+  log_freq: 200
+  lr: 0.0008
+  weight_decay: 0.01
+losses:
+  diffusion: 1
+  repa: 0.25
+  lpips: 0.5
+  kl: 1.0e-06
+show_samples: 8

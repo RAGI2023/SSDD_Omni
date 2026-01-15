@@ -343,7 +343,7 @@ class MetricsManager:
         self.metrics["LPIPS"] = LPIPSMetric(data_range=1.0, device=device)
         self.metrics["PSNR"] = WrappedMetric(t_metrics.PeakSignalNoiseRatio(data_range=1.0, device=device), ["x_gt", "x_pred"], Orderings.MAX)
         self.metrics["SSIM"] = CorrectedStructuralSimilarity(data_range=1.0, device=device)
-        self.metrics["dreamsim"] = DreamSim(cache_dir=cfg.cache_dir, device=device)
+        # self.metrics["dreamsim"] = DreamSim(cache_dir=cfg.cache_dir, device=device)  # Temporarily disabled due to DINO cache issue
         self.metrics["FID"] = FIDMetric(cfg, device=device)
 
         self.bests = {}
