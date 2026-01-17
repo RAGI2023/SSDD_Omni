@@ -33,9 +33,10 @@ checkpoint_path: ${run_dir}/checkpoints
 dataset:
   imagenet_root: /data/360SP-data
   im_size: 128
-  batch_size: 16  # Optimal for RTX 3090 24GB (256 causes OOM with multi-view)
+  batch_size: 16 
   aug_scale: null
   limit: null
+  num_workers: 10  # DataLoader num_workers (reduce if too many open files)
   return_all_views: true  # Enable multi-view mode (required for SSDDMultiView)
 
   # EquiDataset UCM parameters
@@ -54,6 +55,7 @@ ssdd:
   encoder_checkpoint: null  # path to pretrained encoder checkpoint
   encoder_train: false
   decoder: M
+  decoder_image_size: [256, 128]  # Output panorama size (W, H) - 2:1 aspect ratio
 
   # Multi-view specific parameters
   n_views: 4
@@ -88,7 +90,7 @@ training:
   grad_accumulate: 1
   grad_clip: 0.1
   epochs: 300
-  eval_freq: 4
+  eval_freq: 1
   save_on_best: FID
   log_freq: 200
 

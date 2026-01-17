@@ -194,9 +194,37 @@ class AdaLayerNorm(nn.Module):
             ctx_emb = rearrange(ctx_emb, "B C H W -> B H W C")
             ctx_emb = self.linear(self.silu(ctx_emb))
 
-            # Upsample features
-            r = max(1, int((x_L / H / W) ** 0.5))
-            ctx_emb = repeat(ctx_emb, "B W H C -> B (W R1 H R2) C", R1=r, R2=r)
+            # Upsample features - handle non-square aspect ratios (e.g., 2:1 panorama)
+            # x_L = target_H * target_W, ctx_emb has H*W tokens
+            # Need to find R1, R2 such that H*R1 * W*R2 = x_L
+            ctx_tokens = H * W
+            if ctx_tokens == x_L:
+                # No upsampling needed
+                ctx_emb = rearrange(ctx_emb, "B H W C -> B (H W) C")
+            else:
+                # Calculate aspect-aware upsampling factors
+                scale_factor = x_L / ctx_tokens
+                # Assume target has same aspect ratio as ctx_emb (H:W)
+                # target_H = H * R, target_W = W * R where R^2 = scale_factor
+                r = max(1, int(scale_factor ** 0.5))
+                # Adjust if needed to match exactly
+                r1, r2 = r, r
+                while H * r1 * W * r2 < x_L and r1 < 100:
+                    if H * (r1 + 1) * W * r2 <= x_L:
+                        r1 += 1
+                    elif H * r1 * W * (r2 + 1) <= x_L:
+                        r2 += 1
+                    else:
+                        break
+                ctx_emb = repeat(ctx_emb, "B H W C -> B (H R1) (W R2) C", R1=r1, R2=r2)
+                ctx_emb = rearrange(ctx_emb, "B H W C -> B (H W) C")
+                # Truncate or pad to match x_L exactly
+                if ctx_emb.shape[1] > x_L:
+                    ctx_emb = ctx_emb[:, :x_L, :]
+                elif ctx_emb.shape[1] < x_L:
+                    # Pad by repeating last token
+                    pad_size = x_L - ctx_emb.shape[1]
+                    ctx_emb = torch.cat([ctx_emb, ctx_emb[:, -1:, :].expand(-1, pad_size, -1)], dim=1)
         elif ctx_emb.dim() == 3:  # 3D tensor (B, L, C)
             ctx_emb = self.linear(self.silu(ctx_emb))
             ctx_emb = repeat(ctx_emb, "B L C -> B (L R) C", R=max(1, x_L // ctx_emb.shape[1]))

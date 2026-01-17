@@ -199,7 +199,7 @@ class SpiderTasksMultiView:
 
         # Torch.compile
         if compile and self.training:
-            model = auto_compile(self.accelerator, model)
+            model = auto_compile(compile, model)
             self.state.models[name] = model
 
         # Accelerate prepare (distributed)
@@ -237,7 +237,11 @@ class SpiderTasksMultiView:
             if self.cfg.distill_teacher:
                 # Build teacher model (standard SSDD, not multi-view)
                 # Teacher works in panorama space directly
-                self.build_model(SSDD, name="teacher", **self.cfg.ssdd, remove_from_checkpointing=True)
+                # Filter out multi-view specific parameters that SSDD doesn't support
+                multiview_params = ['n_views', 'fusion_type', 'fusion_hidden_dim',
+                                    'use_view_encoding', 'view_encoding_type']
+                teacher_cfg = {k: v for k, v in self.cfg.ssdd.items() if k not in multiview_params}
+                self.build_model(SSDD, name="teacher", **teacher_cfg, remove_from_checkpointing=True)
                 freeze_model(self.models["teacher"])
                 self.models["teacher"].train()
 
@@ -399,7 +403,7 @@ class SpiderTasksMultiView:
             # Eval & checkpoint
             if (cur_epoch + 1) % cfg.training.eval_freq == 0:
                 self.task_eval()
-                save_training_state(self.state, self.checkpoint_path, logger=self.logger)
+                save_training_state(self.state, self.checkpoint_path)
 
             self.accelerator.wait_for_everyone()
 
@@ -409,6 +413,10 @@ class SpiderTasksMultiView:
         self.set_train_state(False)
 
         with self.logger.on_eval(self.test_loader) as eval_log:
+            last_views = None
+            last_panorama = None
+            last_rec = None
+
             for batch in tqdm(self.test_loader, desc="Eval"):
                 views, panorama = batch  # [B, N_views, 3, H, W], [B, 3, H_pano, W_pano]
 
@@ -416,12 +424,21 @@ class SpiderTasksMultiView:
                     # Forward through multi-view model
                     rec_panorama = self.models["ae"](views, gt_panorama=panorama, steps=self.cfg.ssdd.fm_sampler.steps)
 
-                # Update metrics
-                self.logger.metrics.update(panorama, rec_panorama)
+                # Update metrics (normalize to [0, 1] from [-1, 1])
+                panorama_01 = ((panorama + 1) / 2).clamp(0, 1)
+                rec_panorama_01 = ((rec_panorama + 1) / 2).clamp(0, 1)
+                self.logger.metrics.update(x_gt=panorama_01, x_pred=rec_panorama_01)
 
-            # Store samples for visualization
-            eval_log.rec_samples = rec_panorama[:self.cfg.show_samples]
-            eval_log.gt_samples = panorama[:self.cfg.show_samples]
+                # Keep last batch for visualization
+                last_views = views
+                last_panorama = panorama
+                last_rec = rec_panorama
+
+            # Store samples for visualization (input views + GT panorama + predicted panorama)
+            n_show = self.cfg.show_samples
+            eval_log.input_views = last_views[:n_show]  # [N, N_views, 3, H, W]
+            eval_log.gt_samples = last_panorama[:n_show]  # [N, 3, H_pano, W_pano]
+            eval_log.rec_samples = last_rec[:n_show]  # [N, 3, H_pano, W_pano]
 
         if self.training:
             self.set_train_state(True)

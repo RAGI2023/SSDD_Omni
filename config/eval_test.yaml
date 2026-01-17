@@ -1,0 +1,29 @@
+# Configuration for evaluation testing
+# Usage: python test_eval.py --config-name=eval_test
+
+defaults:
+  - SpiderEye
+  - _self_
+
+# Override task to eval
+task: eval
+
+# Use small batch size for testing
+dataset:
+  batch_size: 4
+  limit: 100  # Limit to 100 samples for quick test
+
+# Show fewer samples
+show_samples: 4
+
+# Evaluation settings
+training:
+  eval_freq: 1
+
+# Model checkpoint (specify your checkpoint path)
+ssdd:
+  checkpoint: null  # Set to your checkpoint path, e.g., "runs/jobs/your_run/checkpoints/checkpoint_best.pt"
+  compile: false  # Disable compile for faster loading
+
+# Disable teacher for eval-only
+distill_teacher: false

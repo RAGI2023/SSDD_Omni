@@ -183,6 +183,7 @@ class TransformerBlock(nn.Module):
         hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         ctx_emb: Optional[torch.Tensor] = None,
+        grid_shape: Optional[Tuple[int, int]] = None,  # (H, W) for non-square inputs
     ) -> torch.Tensor:
         # 1. Self-Attention
         if self.ada_norm:
@@ -193,8 +194,12 @@ class TransformerBlock(nn.Module):
         if self.relative_position_bias is not None:
             assert attention_mask is None
             B, N, D = hidden_states.shape
-            grid_size = int(N**0.5)
-            attention_mask = self.relative_position_bias((B, grid_size, grid_size))
+            if grid_shape is not None:
+                grid_H, grid_W = grid_shape
+            else:
+                # Fallback: assume square (backward compatible)
+                grid_H = grid_W = int(N**0.5)
+            attention_mask = self.relative_position_bias((B, grid_H, grid_W))
 
         attn_output = self.attn1(
             norm_hidden_states,
@@ -301,9 +306,11 @@ class VisionTransformer(nn.Module):
         return_dict=False,
     ) -> torch.Tensor:
         # 1. Input
+        grid_shape = None  # (H, W) for non-square inputs
         if hidden_states.dim() == 4:
             _, _, H, W = hidden_states.shape
             H, W = H // self.patch_size, W // self.patch_size
+            grid_shape = (H, W)  # Store for relative position bias
 
             hidden_states = rearrange(hidden_states, "b c (h p1) (w p2) -> b (h w) (c p1 p2)", p1=self.patch_size, p2=self.patch_size)
         else:
@@ -319,7 +326,7 @@ class VisionTransformer(nn.Module):
 
         # 3. Blocks
         for block in self.transformer_blocks:
-            hidden_states = block(hidden_states, attention_mask=attention_mask, ctx_emb=ctx_emb)
+            hidden_states = block(hidden_states, attention_mask=attention_mask, ctx_emb=ctx_emb, grid_shape=grid_shape)
 
         # 4. Output
         if self.norm_out is not None:

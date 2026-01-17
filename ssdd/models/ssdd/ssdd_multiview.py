@@ -175,6 +175,21 @@ class FusionModule(nn.Module):
                 nn.SiLU(),
                 nn.Conv2d(fusion_hidden, z_dim, kernel_size=3, padding=1),
             )
+
+            # Aspect ratio adjustment for 2:1 panorama output
+            # Upsample width by 2x: scale_factor=(height_scale, width_scale) = (1.0, 2.0)
+            # Input: [B, C, zH, zW] -> Output: [B, C, zH, zW*2] for 2:1 panorama
+            num_groups_z = min(32, z_dim)
+            while z_dim % num_groups_z != 0 and num_groups_z > 1:
+                num_groups_z -= 1
+
+            self.aspect_adjust = nn.Sequential(
+                nn.Upsample(scale_factor=(1.0, 2.0), mode='nearest'),  # (H, W) = (1x, 2x)
+                nn.Conv2d(z_dim, z_dim, kernel_size=3, padding=1),
+                nn.GroupNorm(num_groups_z, z_dim),
+                nn.SiLU(),
+            )
+
         elif fusion_type == "attention":
             # Attention-based fusion
             self.query_proj = nn.Conv2d(z_dim, z_dim, kernel_size=1)
@@ -193,7 +208,7 @@ class FusionModule(nn.Module):
             z_views: [B, N_views, C, zH, zW]
 
         Returns:
-            z_fused: [B, C, zH, zW]
+            z_fused: [B, C, zH, zW*2] for 2:1 panorama (width doubled for aspect ratio)
         """
         B, N, C, zH, zW = z_views.shape
         assert N == self.n_views, f"Expected {self.n_views} views, got {N}"
@@ -205,7 +220,8 @@ class FusionModule(nn.Module):
         if self.fusion_type == "concat_conv":
             # Concatenate along channel dimension
             z_concat = z_views.reshape(B, N * C, zH, zW)
-            z_fused = self.fusion_conv(z_concat)
+            z_fused = self.fusion_conv(z_concat)  # [B, C, zH, zW]
+            z_fused = self.aspect_adjust(z_fused)  # [B, C, zH, zW*2] for 2:1 panorama
 
         elif self.fusion_type == "attention":
             # Multi-head attention across views
@@ -264,6 +280,7 @@ class SSDDMultiView(nn.Module):
         encoder_checkpoint: Optional[str] = None,
         encoder_train: bool = False,
         decoder: Optional[Mapping] = None,
+        decoder_image_size: Optional[list] = None,  # [W, H] for output panorama
         fm_trainer: Optional[Mapping] = None,
         fm_sampler: Optional[Mapping] = None,
         checkpoint: Optional[str] = None,
@@ -279,6 +296,7 @@ class SSDDMultiView(nn.Module):
                 encoder_checkpoint=encoder_checkpoint,
                 encoder_train=encoder_train,
                 decoder=decoder,
+                decoder_image_size=decoder_image_size,
                 fm_trainer=fm_trainer,
                 fm_sampler=fm_sampler,
                 checkpoint=checkpoint,

@@ -30,6 +30,7 @@ class SSDD(nn.Module):
         encoder_checkpoint: Optional[str] = None,
         encoder_train: bool = False,
         decoder: Optional[Mapping] = None,
+        decoder_image_size: Optional[list] = None,  # [W, H] for output image
         fm_trainer: Optional[Mapping] = None,
         fm_sampler: Optional[Mapping] = None,
         checkpoint: Optional[str] = None,
@@ -40,7 +41,12 @@ class SSDD(nn.Module):
 
         self.encoder_train = encoder_train
         self.encoder = self.make_encoder(encoder, encoder_checkpoint)
-        self.decoder = UViTDecoder.make(decoder)
+
+        # Build decoder with image_size if provided
+        decoder_kwargs = dict(decoder) if isinstance(decoder, dict) else {"size": decoder}
+        if decoder_image_size is not None:
+            decoder_kwargs["image_size"] = tuple(decoder_image_size)
+        self.decoder = UViTDecoder.make(**decoder_kwargs)
 
         ### Flow-matching ###
 

@@ -24,6 +24,7 @@ from ..mutils.train_utils import aggregate_losses
 from .metrics import MetricsManager
 from .visualize import (
     show_generation_result,
+    show_multiview_result,
 )
 
 ####################################################################
@@ -122,6 +123,7 @@ class TaskResult:
 class EvalResult:
     rec_samples: torch.Tensor = None
     gt_samples: torch.Tensor = None
+    input_views: torch.Tensor = None  # Multi-view fisheye inputs [B, N_views, 3, H, W]
 
 
 @dataclass
@@ -147,8 +149,11 @@ class MetricLogger:
 
         self.timers.total.start()  # pylint: disable=no-member
 
-        if self.accelerator.is_main_process and train:
-            self.writer = SummaryWriter(log_dir="tensorboard_logs")
+        # Create TensorBoard writer for both train and eval modes
+        if self.accelerator.is_main_process:
+            # Use run_dir for tensorboard logs to separate experiments
+            tensorboard_dir = Path(self.cfg.run_dir) / "tensorboard"
+            self.writer = SummaryWriter(log_dir=str(tensorboard_dir))
             self.print(f"Will write tensorboard logs inside {Path(self.writer.log_dir).resolve()}")
         else:
             self.writer = None
@@ -386,15 +391,75 @@ class MetricLogger:
                 # Show image decoding steps
                 title = f"Generated samples after epoch {self.state.cur_epoch}"
                 if isinstance(ret.rec_samples, torch.Tensor):
-                    fig = show_generation_result(ret.rec_samples, ret.gt_samples, title=title)
+                    # Check if we have multi-view inputs
+                    if ret.input_views is not None:
+                        # Multi-view visualization: Save images directly to TensorBoard
+                        def normalize_for_tb(img):
+                            """Normalize from [-1, 1] to [0, 1] for TensorBoard display"""
+                            return ((img + 1) / 2).clamp(0, 1)
+
+                        def make_grid_torch(images, nrow, padding=2):
+                            """Create image grid using pure PyTorch (no torchvision dependency)"""
+                            n, c, h, w = images.shape
+                            ncol = (n + nrow - 1) // nrow  # ceil division
+
+                            # Create output grid with padding
+                            grid_h = ncol * h + (ncol + 1) * padding
+                            grid_w = nrow * w + (nrow + 1) * padding
+                            grid = torch.zeros((c, grid_h, grid_w), dtype=images.dtype, device=images.device)
+
+                            for idx in range(n):
+                                row = idx // nrow
+                                col = idx % nrow
+                                y = row * h + (row + 1) * padding
+                                x = col * w + (col + 1) * padding
+                                grid[:, y:y+h, x:x+w] = images[idx]
+
+                            return grid
+
+                        # Prepare images for TensorBoard
+                        # Input views: [N, N_views, 3, H, W] -> reshape to [N*N_views, 3, H, W]
+                        n_samples = ret.input_views.shape[0]
+                        n_views = ret.input_views.shape[1]
+                        views_flat = ret.input_views.reshape(-1, 3, ret.input_views.shape[-2], ret.input_views.shape[-1])
+                        views_normalized = normalize_for_tb(views_flat)
+
+                        # GT and predicted panoramas: [N, 3, H_pano, W_pano]
+                        gt_normalized = normalize_for_tb(ret.gt_samples)
+                        pred_normalized = normalize_for_tb(ret.rec_samples)
+
+                        # Create grids for display
+                        views_grid = make_grid_torch(views_normalized, nrow=n_views, padding=2)
+                        gt_grid = make_grid_torch(gt_normalized, nrow=min(4, n_samples), padding=2)
+                        pred_grid = make_grid_torch(pred_normalized, nrow=min(4, n_samples), padding=2)
+
+                        # Add to TensorBoard Images tab
+                        if self.writer:
+                            self.writer.add_image('MultiView/fisheye_views', views_grid, global_step=self.state.cur_steps)
+                            self.writer.add_image('MultiView/gt_panorama', gt_grid, global_step=self.state.cur_steps)
+                            self.writer.add_image('MultiView/pred_panorama', pred_grid, global_step=self.state.cur_steps)
+                            self.print(f"Saved multi-view images to TensorBoard Images tab")
+
+                        # Also save a figure to disk for easy viewing
+                        fig = show_multiview_result(
+                            ret.input_views,
+                            ret.gt_samples,
+                            ret.rec_samples,
+                            title=title
+                        )
+                        fig_name = f"multiview_generation{fig_suffix}"
+                    else:
+                        # Standard visualization (backward compatibility)
+                        fig = show_generation_result(ret.rec_samples, ret.gt_samples, title=title)
+                        fig_name = f"generation{fig_suffix}"
+                        if self.writer:
+                            self.writer.add_figure("HR/step_decode", fig, global_step=self.state.cur_steps)
+
+                    # Always save to disk for easy viewing
+                    fig.savefig(f"{plot_path}/{fig_name}.png", dpi=100)
+                    self.print(f"Saved generation figure at {plot_path}/{fig_name}.png")
                 else:
                     raise NotImplementedError("Unknown type of displayed samples")
-                fig_name = f"generation{fig_suffix}"
-                if self.writer:
-                    self.writer.add_figure("HR/step_decode", fig, global_step=self.state.cur_steps)
-                else:
-                    fig.savefig(f"{plot_path}/{fig_name}.png", dpi=100)
-                    self.print(f"Saved generation steps figure at {plot_path}/{fig_name}.png")
 
                 self.accelerator.debug("Image(s) saved on disk")
 

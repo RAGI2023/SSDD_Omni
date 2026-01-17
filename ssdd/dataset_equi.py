@@ -60,8 +60,9 @@ class EquiDatasetWrapper(EquiDataset):
         jitter_cfg = DEFAULT_JITTER_CONFIG if split == "train" else NO_JITTER_CONFIG
 
         # Default UCM parameters (can be overridden by kwargs)
+        # Equirectangular panorama should be 2:1 aspect ratio (360° x 180°)
         ucm_params = {
-            "canvas_size": (im_size, im_size),  # Square canvas for UViT decoder compatibility
+            "canvas_size": (im_size * 2, im_size),  # 2:1 panorama (width, height) = (256, 128)
             "out_w": im_size,
             "out_h": im_size,
             "f_pix": 220.0,
@@ -131,6 +132,7 @@ def make_dataset_and_loader(
     batch_size,
     aug_scale=None,
     limit=None,
+    num_workers=10,
     return_all_views=True,
     **equi_kwargs
 ):
@@ -169,8 +171,7 @@ def make_dataset_and_loader(
         dataset,
         batch_size=gpu_batch_size,
         shuffle=is_train,
-        num_workers=4,  # Reduced from 10 to avoid data loading bottleneck with large panoramas
-        persistent_workers=True,
+        num_workers=num_workers,
         pin_memory=True,
     )
 
