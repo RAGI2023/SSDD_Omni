@@ -8,8 +8,8 @@ run_dir: ${ckpt_dir}/jobs/${run_name}
 checkpoint_path: ${run_dir}/checkpoints
 dataset:
   imagenet_root: /data/360SP-data
-  im_size: 128
-  batch_size: 16
+  im_size: 512
+  batch_size: 4
   aug_scale: null
   limit: null
   num_workers: 10

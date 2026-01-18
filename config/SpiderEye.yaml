@@ -32,7 +32,7 @@ checkpoint_path: ${run_dir}/checkpoints
 
 dataset:
   imagenet_root: /data/360SP-data
-  im_size: 128
+  im_size: 256
   batch_size: 16 
   aug_scale: null
   limit: null
