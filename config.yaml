@@ -2,17 +2,17 @@ seed: 0
 task: train
 runtime_path: ${hydra:runtime.cwd}
 ckpt_dir: ${runtime_path}/runs
-run_name: multiview_experiment
+run_name: train_enc_f8c4
 cache_dir: ${ckpt_dir}/cache
 run_dir: ${ckpt_dir}/jobs/${run_name}
 checkpoint_path: ${run_dir}/checkpoints
 dataset:
   imagenet_root: /data/360SP-data
-  im_size: 512
-  batch_size: 4
+  im_size: 128
+  batch_size: 12
   aug_scale: null
   limit: null
-  num_workers: 10
+  num_workers: 20
   return_all_views: true
   f_pix: 220.0
   xi: 0.9
@@ -23,7 +23,7 @@ ssdd:
   checkpoint: null
   encoder: f8c4
   encoder_checkpoint: null
-  encoder_train: false
+  encoder_train: true
   decoder: M
   decoder_image_size:
   - 256
@@ -49,11 +49,11 @@ training:
   mixed_precision: bf16
   grad_accumulate: 1
   grad_clip: 0.1
-  epochs: 100
-  eval_freq: 1
+  epochs: 300
+  eval_freq: 3
   save_on_best: FID
   log_freq: 200
-  lr: 0.0008
+  lr: 0.0001
   weight_decay: 0.01
 losses:
   diffusion: 1

@@ -32,11 +32,11 @@ checkpoint_path: ${run_dir}/checkpoints
 
 dataset:
   imagenet_root: /data/360SP-data
-  im_size: 256
-  batch_size: 16 
+  im_size: 128
+  batch_size: 12 
   aug_scale: null
   limit: null
-  num_workers: 10  # DataLoader num_workers (reduce if too many open files)
+  num_workers: 20  # DataLoader num_workers (reduce if too many open files)
   return_all_views: true  # Enable multi-view mode (required for SSDDMultiView)
 
   # EquiDataset UCM parameters
@@ -90,7 +90,7 @@ training:
   grad_accumulate: 1
   grad_clip: 0.1
   epochs: 300
-  eval_freq: 1
+  eval_freq: 3
   save_on_best: FID
   log_freq: 200
 

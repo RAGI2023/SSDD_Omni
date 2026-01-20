@@ -173,6 +173,7 @@ def make_dataset_and_loader(
         shuffle=is_train,
         num_workers=num_workers,
         pin_memory=True,
+        persistent_workers=True if num_workers > 0 else False,
     )
 
     return dataset, loader

@@ -371,9 +371,9 @@ class SpiderTasksMultiView:
                 acc.clip_grad_norm_(m.parameters(), self.cfg.training.grad_clip)
 
         optimizer.step()
-        optimizer.zero_grad()
+        optimizer.zero_grad(set_to_none=True)
 
-        return losses
+        return {k: v.detach() for k, v in losses.items()}
 
     def task_train(self):
         cfg = self.cfg
