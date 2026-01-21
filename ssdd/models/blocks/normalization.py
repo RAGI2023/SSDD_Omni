@@ -4,6 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
+import math
 import numbers
 
 import torch
@@ -194,30 +195,26 @@ class AdaLayerNorm(nn.Module):
             ctx_emb = rearrange(ctx_emb, "B C H W -> B H W C")
             ctx_emb = self.linear(self.silu(ctx_emb))
 
-            # Upsample features - handle non-square aspect ratios (e.g., 2:1 panorama)
+            # Upsample features for 2:1 panorama
             # x_L = target_H * target_W, ctx_emb has H*W tokens
-            # Need to find R1, R2 such that H*R1 * W*R2 = x_L
             ctx_tokens = H * W
             if ctx_tokens == x_L:
                 # No upsampling needed
                 ctx_emb = rearrange(ctx_emb, "B H W C -> B (H W) C")
             else:
-                # Calculate aspect-aware upsampling factors
-                scale_factor = x_L / ctx_tokens
-                # Assume target has same aspect ratio as ctx_emb (H:W)
-                # target_H = H * R, target_W = W * R where R^2 = scale_factor
-                r = max(1, int(scale_factor ** 0.5))
-                # Adjust if needed to match exactly
-                r1, r2 = r, r
-                while H * r1 * W * r2 < x_L and r1 < 100:
-                    if H * (r1 + 1) * W * r2 <= x_L:
-                        r1 += 1
-                    elif H * r1 * W * (r2 + 1) <= x_L:
-                        r2 += 1
-                    else:
-                        break
+                # Calculate target 2:1 shape: W_target = 2 * H_target
+                # x_L = H_target * W_target = H_target * (2 * H_target) = 2 * H_target^2
+                H_target = int(math.sqrt(x_L / 2))
+                W_target = H_target * 2
+
+                # Calculate upsampling factors
+                r1 = max(1, H_target // H)
+                r2 = max(1, W_target // W)
+
+                # Upsample using nearest neighbor repeat
                 ctx_emb = repeat(ctx_emb, "B H W C -> B (H R1) (W R2) C", R1=r1, R2=r2)
                 ctx_emb = rearrange(ctx_emb, "B H W C -> B (H W) C")
+
                 # Truncate or pad to match x_L exactly
                 if ctx_emb.shape[1] > x_L:
                     ctx_emb = ctx_emb[:, :x_L, :]

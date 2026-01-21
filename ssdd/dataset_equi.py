@@ -35,7 +35,7 @@ class EquiDatasetWrapper(EquiDataset):
         split: str = "train",
         im_size: int = 128,
         transform: Any = None,
-        return_all_views: bool = True,  # NEW: option to return all views
+        return_all_views: bool = True,
         **kwargs: Any,
     ) -> None:
         """

@@ -109,10 +109,20 @@ class SpiderTasksMultiView:
 
             # End task
             task_log.results = task_result
+        self.accelerator.end_training()
+
+        return task_result
 
     ##### Setup #####
 
     def setup_job_env(self):
+        """Setup the job environment"""
+        # Ensure working inside the run directory
+        ensure_path(self.cfg.run_dir)
+        os.chdir(self.cfg.run_dir)
+        ensure_path(self.cfg.cache_dir)
+        ensure_path(self.cfg.checkpoint_path)
+
         # Set seed
         set_seed(self.cfg.seed)
 
@@ -133,6 +143,7 @@ class SpiderTasksMultiView:
             kwargs_handlers=[DistributedDataParallelKwargs()],
             gradient_accumulation_steps=self.cfg.training.grad_accumulate,
             step_scheduler_with_optimizer=False,
+            mixed_precision=(self.cfg.training.mixed_precision or "no"),
         )
 
         self.init_state()
@@ -243,7 +254,7 @@ class SpiderTasksMultiView:
                 teacher_cfg = {k: v for k, v in self.cfg.ssdd.items() if k not in multiview_params}
                 self.build_model(SSDD, name="teacher", **teacher_cfg, remove_from_checkpointing=True)
                 freeze_model(self.models["teacher"])
-                self.models["teacher"].train()
+                self.models["teacher"].eval()
 
     def task_train_prepare(self):
         self.optimizer = build_optimizer([self.models["ae"], self.models["aux_losses"]], self.cfg.training.lr, self.cfg.training.weight_decay)
@@ -386,19 +397,31 @@ class SpiderTasksMultiView:
             with self.logger.on_epoch(self.train_loader):
                 for i_batch, batch in enumerate(self.train_loader):
                     with self.logger.on_batch(i_batch) as batch_log:
-                        # Update step counter
-                        self.state.cur_steps += 1
-                        train_ctx = {"cur_steps": self.state.cur_steps}
+                        train_ctx = {
+                            "losses": batch_log.losses,
+                            "i_batch": i_batch,
+                            "cur_epoch": self.state.cur_epoch,
+                            "cur_steps": self.state.cur_steps,
+                        }
 
                         # AE step
                         with self.accelerator.accumulate(*[self.models["ae"], self.models["aux_losses"]]):
                             batch_log.losses = self._train_do_step(self.optimizer, batch, train_ctx)
+
+                        # EMA update
+                        if EMA.uses_ema(self.models["ae"]):
+                            self.set_train_state(False)
+                            EMA.update_ema_modules(self.models["ae"])
+                            self.set_train_state(True)
 
                         # GAN step
                         if "gan" in self.models:
                             with self.accelerator.accumulate(self.models["gan"]):
                                 gan_losses = self._train_do_step(self.gan_optimizer, batch, train_ctx, step_gan=True)
                                 batch_log.losses.update(gan_losses)
+
+                        self.accelerator.wait_for_everyone()
+                        self.state.cur_steps += 1
 
             # Eval & checkpoint
             if (cur_epoch + 1) % cfg.training.eval_freq == 0:
@@ -410,24 +433,31 @@ class SpiderTasksMultiView:
     ##### Evaluation (task_eval) #####
 
     def task_eval(self):
+        acc = self.accelerator
         self.set_train_state(False)
+        self.generator = torch.Generator(device=acc.device)
+        self.generator.manual_seed(self.cfg.seed)
 
         with self.logger.on_eval(self.test_loader) as eval_log:
             last_views = None
             last_panorama = None
             last_rec = None
 
-            for batch in tqdm(self.test_loader, desc="Eval"):
+            for batch in tqdm(self.test_loader, desc="Eval", disable=not acc.is_main_process):
                 views, panorama = batch  # [B, N_views, 3, H, W], [B, 3, H_pano, W_pano]
 
-                with torch.no_grad():
+                with torch.no_grad(), acc.autocast():
+                    # Generate reproducible noise for evaluation consistency
+                    noise = reproducible_rand(acc, self.generator, views.shape[0:1] + views.shape[2:])
+                    # Determine steps based on teacher mode
+                    steps = 1 if "teacher" in self.models else self.cfg.ssdd.fm_sampler.steps
                     # Forward through multi-view model
-                    rec_panorama = self.models["ae"](views, gt_panorama=panorama, steps=self.cfg.ssdd.fm_sampler.steps)
+                    rec_panorama = self.models["ae"](views, gt_panorama=panorama, noise=noise, steps=steps)
 
                 # Update metrics (normalize to [0, 1] from [-1, 1])
-                panorama_01 = ((panorama + 1) / 2).clamp(0, 1)
-                rec_panorama_01 = ((rec_panorama + 1) / 2).clamp(0, 1)
-                self.logger.metrics.update(x_gt=panorama_01, x_pred=rec_panorama_01)
+                rgb_panorama = self.to_rgb(panorama)
+                rgb_rec_panorama = self.to_rgb(rec_panorama)
+                self.logger.metrics.update(x_gt=rgb_panorama, x_pred=rgb_rec_panorama)
 
                 # Keep last batch for visualization
                 last_views = views
@@ -435,10 +465,19 @@ class SpiderTasksMultiView:
                 last_rec = rec_panorama
 
             # Store samples for visualization (input views + GT panorama + predicted panorama)
-            n_show = self.cfg.show_samples
-            eval_log.input_views = last_views[:n_show]  # [N, N_views, 3, H, W]
-            eval_log.gt_samples = last_panorama[:n_show]  # [N, 3, H_pano, W_pano]
-            eval_log.rec_samples = last_rec[:n_show]  # [N, 3, H_pano, W_pano]
+            if self.cfg.show_samples and acc.is_main_process:
+                n_samples = self.cfg.show_samples
+                eval_log.input_views = last_views[:n_samples]  # [N, N_views, 3, H, W]
+                eval_log.gt_samples = self.to_rgb(last_panorama[:n_samples])  # [N, 3, H_pano, W_pano]
+                eval_log.rec_samples = self.to_rgb(last_rec[:n_samples])  # [N, 3, H_pano, W_pano]
 
         if self.training:
             self.set_train_state(True)
+
+        return deepcopy(self.logger.metrics.last_m_vals)
+
+    ##### Utils #####
+
+    def to_rgb(self, x):  # x in [-1;1] ; output will be in [0;1]
+        assert x.ndim == 4
+        return torch.clamp(255 * (x + 1) / 2, 0, 255).round() / 255
