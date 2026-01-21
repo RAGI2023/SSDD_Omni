@@ -5,7 +5,7 @@ import argparse
 from pathlib import Path
 from tqdm import tqdm  
 
-def split_dataset(data_dir, output_dir, type, test_ratio=0.2, seed=42,):
+def split_dataset(data_dir, output_dir, type, test_ratio=0.2, seed=42, mode='copy'):
     # 设置随机种子，保证可复现
     random.seed(seed)
 
@@ -38,14 +38,18 @@ def split_dataset(data_dir, output_dir, type, test_ratio=0.2, seed=42,):
     test_files = files[:test_size]
     train_files = files[test_size:]
 
-    # 拷贝文件（带进度条）
-    print(f"📦 正在复制训练集 ({len(train_files)} )...")
-    for f in tqdm(train_files, desc="Train", ncols=80):
-        shutil.copy(f, train_dir / f.name)
+    # 根据模式选择操作函数
+    operation = shutil.move if mode == 'move' else shutil.copy
+    action_name = "移动" if mode == 'move' else "复制"
 
-    print(f"🧪 正在复制验证集 ({len(test_files)} )...")
+    # 处理文件（带进度条）
+    print(f"📦 正在{action_name}训练集 ({len(train_files)} )...")
+    for f in tqdm(train_files, desc="Train", ncols=80):
+        operation(f, train_dir / f.name)
+
+    print(f"🧪 正在{action_name}验证集 ({len(test_files)} )...")
     for f in tqdm(test_files, desc="Test", ncols=80):
-        shutil.copy(f, eval_dir / f.name)
+        operation(f, eval_dir / f.name)
 
     print("\n✅ 数据集划分完成！")
     print(f"训练集：{len(train_files)}  -> {train_dir}")
@@ -58,9 +62,10 @@ def main():
     parser.add_argument("-r", "--eval_ratio", type=float, default=0.2, help="验证集比例（默认0.2）")
     parser.add_argument("-s", "--seed", type=int, default=42, help="随机种子（默认42）")
     parser.add_argument('-d', '--data_type', type=str, required=True, choices=['video', 'img'], help="数据类型：video 或 img")
+    parser.add_argument('-m', '--mode', type=str, default='copy', choices=['copy', 'move'], help="操作模式：copy（复制）或 move（移动），默认为 copy")
     args = parser.parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
-    split_dataset(args.input_dir, args.output_dir, args.data_type, args.eval_ratio, args.seed)
+    split_dataset(args.input_dir, args.output_dir, args.data_type, args.eval_ratio, args.seed, args.mode)
 
 if __name__ == "__main__":
     main()
