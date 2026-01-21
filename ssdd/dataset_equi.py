@@ -174,6 +174,7 @@ def make_dataset_and_loader(
         num_workers=num_workers,
         pin_memory=True,
         persistent_workers=True if num_workers > 0 else False,
+        prefetch_factor=10 if num_workers > 0 else None,  # Prefetch
     )
 
     return dataset, loader
