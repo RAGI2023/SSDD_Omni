@@ -46,7 +46,7 @@ dataset:
 
 # === Model arguments ===
 
-distill_teacher: true
+distill_teacher: false
 ssdd:
   compile: true
   checkpoint: null

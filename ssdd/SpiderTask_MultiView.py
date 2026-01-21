@@ -311,15 +311,29 @@ class SpiderTasksMultiView:
 
         # Train SSDD: main loss & predict panorama
         if "teacher" in self.models:
-            # Train on distillation
+            # Distillation mode: Teacher performs multi-step inference, Student learns 1-step
             with torch.no_grad():
                 self.models["teacher"].eval()
-                # Teacher operates on panorama directly
-                target_panorama, z, noise = self.models["teacher"](panorama, as_teacher=True)
-            # Student learns from multi-view inputs
-            ssdd_out = self.models["ae"](views, gt_panorama=target_panorama, z=z, noise=noise, from_noise=True)
+                # Teacher (pre-trained SSDDMultiView) encodes views and performs multi-step decoding
+                target_panorama, z, noise = self.models["teacher"](
+                    gt_views=views,          # Encode content from views
+                    gt_panorama=panorama,    # Only for determining output shape
+                    as_teacher=True
+                )
+                # target_panorama: Teacher's multi-step reconstruction
+                # z: Teacher's fused latent from views
+                # noise: Noise used by Teacher
+
+            # Student learns to achieve same result in 1 step
+            ssdd_out = self.models["ae"](
+                gt_views=views,              # Same views input
+                gt_panorama=target_panorama, # Learn to match Teacher's output
+                z=z,                         # Use Teacher's fused latent
+                noise=noise,                 # Share Teacher's noise
+                from_noise=True              # Train with t=1.0 (one-step distillation)
+            )
         else:
-            # Train on target
+            # Normal training: learn to reconstruct GT panorama
             ssdd_out = self.models["ae"](views, gt_panorama=panorama)
 
         losses = ssdd_out.losses
