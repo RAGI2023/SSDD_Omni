@@ -461,8 +461,8 @@ class SpiderTasksMultiView:
                 views, panorama = batch  # [B, N_views, 3, H, W], [B, 3, H_pano, W_pano]
 
                 with torch.no_grad(), acc.autocast():
-                    # Generate reproducible noise for evaluation consistency
-                    noise = reproducible_rand(acc, self.generator, views.shape[0:1] + views.shape[2:])
+                    # Generate reproducible noise for evaluation consistency (panorama shape, not view shape!)
+                    noise = reproducible_rand(acc, self.generator, panorama.shape)
                     # Determine steps based on teacher mode
                     steps = 1 if "teacher" in self.models else self.cfg.ssdd.fm_sampler.steps
                     # Forward through multi-view model

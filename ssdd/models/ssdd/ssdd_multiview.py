@@ -176,20 +176,6 @@ class FusionModule(nn.Module):
                 nn.Conv2d(fusion_hidden, z_dim, kernel_size=3, padding=1),
             )
 
-            # Aspect ratio adjustment for 2:1 panorama output
-            # Upsample width by 2x: scale_factor=(height_scale, width_scale) = (1.0, 2.0)
-            # Input: [B, C, zH, zW] -> Output: [B, C, zH, zW*2] for 2:1 panorama
-            num_groups_z = min(32, z_dim)
-            while z_dim % num_groups_z != 0 and num_groups_z > 1:
-                num_groups_z -= 1
-
-            self.aspect_adjust = nn.Sequential(
-                nn.Upsample(scale_factor=(1.0, 2.0), mode='nearest'),  # (H, W) = (1x, 2x)
-                nn.Conv2d(z_dim, z_dim, kernel_size=3, padding=1),
-                nn.GroupNorm(num_groups_z, z_dim),
-                nn.SiLU(),
-            )
-
         elif fusion_type == "attention":
             # Attention-based fusion
             self.query_proj = nn.Conv2d(z_dim, z_dim, kernel_size=1)
@@ -201,6 +187,20 @@ class FusionModule(nn.Module):
             pass
         else:
             raise ValueError(f"Unknown fusion_type: {fusion_type}")
+
+        # Aspect ratio adjustment for 2:1 panorama output (shared by all fusion types)
+        # Upsample width by 2x: scale_factor=(height_scale, width_scale) = (1.0, 2.0)
+        # Input: [B, C, zH, zW] -> Output: [B, C, zH, zW*2] for 2:1 panorama
+        num_groups_z = min(32, z_dim)
+        while z_dim % num_groups_z != 0 and num_groups_z > 1:
+            num_groups_z -= 1
+
+        self.aspect_adjust = nn.Sequential(
+            nn.Upsample(scale_factor=(1.0, 2.0), mode='nearest'),  # (H, W) = (1x, 2x)
+            nn.Conv2d(z_dim, z_dim, kernel_size=3, padding=1),
+            nn.GroupNorm(num_groups_z, z_dim),
+            nn.SiLU(),
+        )
 
     def forward(self, z_views: torch.Tensor) -> torch.Tensor:
         """
@@ -251,10 +251,14 @@ class FusionModule(nn.Module):
 
             z_fused = z_fused.reshape(B, C, zH, zW)
             z_fused = self.out_proj(z_fused)
+            # Aspect ratio adjustment for 2:1 panorama output
+            z_fused = self.aspect_adjust(z_fused)  # [B, C, zH, zW*2]
 
         elif self.fusion_type == "average":
             # Simple average
             z_fused = z_views.mean(dim=1)
+            # Aspect ratio adjustment for 2:1 panorama output
+            z_fused = self.aspect_adjust(z_fused)  # [B, C, zH, zW*2]
 
         return z_fused
 
