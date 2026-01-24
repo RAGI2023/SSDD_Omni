@@ -41,12 +41,12 @@ dataset:
 
   # EquiDataset UCM parameters
   f_pix: 220.0
-  xi: 0.9
+  xi: 0.85
   mask_mode: inscribed
 
   # UCM jitter parameters (for data augmentation during training)
   # Only applied to training split; validation uses no jitter
-  xi_jitter: 0.1        # xi扰动范围: xi * (1 ± xi_jitter), 0表示不扰动
+  xi_jitter: 0.4        # xi扰动范围: xi * (1 ± xi_jitter), 0表示不扰动
   f_jitter: 0.1         # f_pix扰动范围: f_pix / (1 ± f_jitter), 0表示不扰动
   jitter_target: both   # "xi" | "f" | "both" - 扰动目标
 
