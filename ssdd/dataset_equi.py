@@ -74,6 +74,11 @@ class EquiDatasetWrapper(EquiDataset):
         # Override with user-provided kwargs
         ucm_params.update(kwargs)
 
+        # Disable UCM jitter for validation split (only rotation/lighting jitter is disabled via jitter_cfg)
+        if split == "val":
+            ucm_params["xi_jitter"] = 0.0
+            ucm_params["f_jitter"] = 0.0
+
         # Initialize parent EquiDataset
         super().__init__(folder_path, **ucm_params)
 
@@ -260,6 +265,11 @@ class EquiVideoDatasetWrapper(EquiVideoDataset):
 
         # Override with user-provided kwargs
         ucm_params.update(kwargs)
+
+        # Disable UCM jitter for validation split
+        if split == "val":
+            ucm_params["xi_jitter"] = 0.0
+            ucm_params["f_jitter"] = 0.0
 
         # Initialize parent EquiVideoDataset
         super().__init__(folder_path, **ucm_params)
