@@ -27,7 +27,7 @@ Usage:
 import hydra
 import lpips
 import torch
-from omegaconf import DictConfig
+from omegaconf import DictConfig, open_dict
 
 from ssdd.SpiderTask_MultiView import SpiderTasksMultiView
 
@@ -44,8 +44,9 @@ lpips.normalize_tensor = _normalize_tensor
 @hydra.main(version_base=None, config_path="../config", config_name="SpiderEye")
 def main(cfg: DictConfig):
     # Ensure return_all_views is True for multi-view training
-    if 'return_all_views' not in cfg.dataset:
-        cfg.dataset['return_all_views'] = True
+    with open_dict(cfg):
+        if 'return_all_views' not in cfg.dataset:
+            cfg.dataset['return_all_views'] = True
 
     task = SpiderTasksMultiView(cfg)
     task()

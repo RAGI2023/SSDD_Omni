@@ -15,7 +15,7 @@ from .mutils.main_utils import TaskState
 
 # Import EquiDataset from utils
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from utils.EquiDataset import EquiDataset, DEFAULT_JITTER_CONFIG, NO_JITTER_CONFIG
+from utils.EquiDataset import EquiDataset, EquiVideoDataset, DEFAULT_JITTER_CONFIG, NO_JITTER_CONFIG
 
 
 class EquiDatasetWrapper(EquiDataset):
@@ -196,5 +196,183 @@ def load_equirect(ds_cfg):
     """
     train_dataset, train_loader = make_dataset_and_loader(True, **ds_cfg)
     test_dataset, test_loader = make_dataset_and_loader(False, **ds_cfg)
+
+    return (train_dataset, test_dataset), (train_loader, test_loader)
+
+
+# ============== Video Dataset ==============
+
+
+class EquiVideoDatasetWrapper(EquiVideoDataset):
+    """
+    Wrapper around EquiVideoDataset for multi-view SSDD training.
+
+    Extracts frames from 360° panoramic videos and converts to fisheye views.
+    Returns same format as EquiDatasetWrapper for compatibility.
+    """
+
+    def __init__(
+        self,
+        root: str,
+        split: str = "train",
+        im_size: int = 128,
+        transform: Any = None,
+        return_all_views: bool = True,
+        frame_interval: int = 30,
+        max_frames_per_video: int = None,
+        **kwargs: Any,
+    ) -> None:
+        """
+        Args:
+            root: Root directory containing video files (with train/val subdirs)
+            split: "train" or "val"
+            im_size: Output image size
+            transform: Optional transforms (applied after fisheye conversion)
+            return_all_views: If True, return all views; if False, return only first view
+            frame_interval: Extract one frame every N frames (default: 30)
+            max_frames_per_video: Max frames per video (None = no limit)
+            **kwargs: Additional arguments for EquiVideoDataset
+        """
+        assert split in ["train", "val"]
+        self.split = split
+        self.im_size = im_size
+        self.custom_transform = transform
+        self.return_all_views = return_all_views
+
+        # Construct folder path based on split
+        folder_path = os.path.join(root, split)
+
+        # Determine jitter config based on split
+        jitter_cfg = DEFAULT_JITTER_CONFIG if split == "train" else NO_JITTER_CONFIG
+
+        # Default UCM parameters
+        ucm_params = {
+            "canvas_size": (im_size * 2, im_size),
+            "out_w": im_size,
+            "out_h": im_size,
+            "f_pix": 220.0,
+            "xi": 0.9,
+            "mask_mode": "inscribed",
+            "jitter_cfg": jitter_cfg,
+            "frame_interval": frame_interval,
+            "max_frames_per_video": max_frames_per_video,
+        }
+
+        # Override with user-provided kwargs
+        ucm_params.update(kwargs)
+
+        # Initialize parent EquiVideoDataset
+        super().__init__(folder_path, **ucm_params)
+
+    def __getitem__(self, idx):
+        """
+        Returns:
+            imgs: Tensor [Nviews, 3, H, W] in range [-1, 1] OR [3, H, W] if return_all_views=False
+            img_original: Tensor [3, H_pano, W_pano] in range [-1, 1] (panorama)
+        """
+        # Get fisheye views and original panorama from parent class
+        imgs, img_original = super().__getitem__(idx)
+
+        # Normalize to [-1, 1] (SSDD standard)
+        imgs = imgs * 2.0 - 1.0
+        img_original = img_original * 2.0 - 1.0
+
+        # Apply custom transforms if provided
+        if self.custom_transform is not None:
+            if self.return_all_views:
+                imgs = torch.stack([self.custom_transform(imgs[i]) for i in range(imgs.shape[0])])
+            else:
+                imgs = self.custom_transform(imgs[0])
+            img_original = self.custom_transform(img_original)
+
+        # Return format based on return_all_views flag
+        if self.return_all_views:
+            return imgs, img_original
+        else:
+            return imgs[0], 0
+
+    def extra_repr(self) -> str:
+        return f"Split: {self.split}, Image size: {self.im_size}, Multi-view: {self.return_all_views}, Frames: {len(self)}"
+
+
+def make_video_dataset_and_loader(
+    is_train,
+    *,
+    video_root,
+    im_size,
+    batch_size,
+    frame_interval=30,
+    max_frames_per_video=None,
+    aug_scale=None,
+    limit=None,
+    num_workers=10,
+    return_all_views=True,
+    **equi_kwargs
+):
+    """
+    Create EquiVideoDataset and DataLoader.
+
+    Args:
+        is_train: Whether this is training split
+        video_root: Root directory (will look for train/val subdirs containing videos)
+        im_size: Image size
+        batch_size: Total batch size across all GPUs
+        frame_interval: Extract one frame every N frames
+        max_frames_per_video: Max frames per video (None = no limit)
+        aug_scale: Unused
+        limit: Limit number of samples
+        return_all_views: If True, return multi-view data
+        **equi_kwargs: Additional arguments for EquiVideoDataset
+    """
+    transform = make_transform(is_train, im_size=im_size, aug_scale=aug_scale)
+
+    dataset = EquiVideoDatasetWrapper(
+        video_root,
+        "train" if is_train else "val",
+        im_size=im_size,
+        transform=transform,
+        return_all_views=return_all_views,
+        frame_interval=frame_interval,
+        max_frames_per_video=max_frames_per_video,
+        **equi_kwargs
+    )
+
+    if limit is not None:
+        dataset = torch.utils.data.Subset(dataset, list(range(min(limit, len(dataset)))))
+
+    num_proc = TaskState().accelerator.num_processes
+    gpu_batch_size = batch_size // num_proc
+    assert gpu_batch_size * num_proc == batch_size, f"Batch size {batch_size} not divisible by number of processes {num_proc}"
+
+    loader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=gpu_batch_size,
+        shuffle=is_train,
+        num_workers=num_workers,
+        pin_memory=True,
+        persistent_workers=True if num_workers > 0 else False,
+        prefetch_factor=10 if num_workers > 0 else None,
+    )
+
+    return dataset, loader
+
+
+def load_equirect_video(ds_cfg):
+    """
+    Load equirectangular panorama video dataset.
+
+    Args:
+        ds_cfg: Dataset config dict with keys:
+            - video_root: root path containing train/val subdirs with videos
+            - im_size: image size
+            - batch_size: batch size
+            - frame_interval: extract one frame every N frames (default: 30)
+            - max_frames_per_video: max frames per video (None = no limit)
+            - limit: optional sample limit
+            - return_all_views: if True, return multi-view data (default: True)
+            - Additional EquiDataset params (f_pix, xi, mask_mode, etc.)
+    """
+    train_dataset, train_loader = make_video_dataset_and_loader(True, **ds_cfg)
+    test_dataset, test_loader = make_video_dataset_and_loader(False, **ds_cfg)
 
     return (train_dataset, test_dataset), (train_loader, test_loader)

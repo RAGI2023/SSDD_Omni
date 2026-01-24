@@ -398,47 +398,59 @@ class MetricLogger:
                             """Normalize from [-1, 1] to [0, 1] for TensorBoard display"""
                             return ((img + 1) / 2).clamp(0, 1)
 
-                        def make_grid_torch(images, nrow, padding=2):
-                            """Create image grid using pure PyTorch (no torchvision dependency)"""
-                            n, c, h, w = images.shape
-                            ncol = (n + nrow - 1) // nrow  # ceil division
-
-                            # Create output grid with padding
-                            grid_h = ncol * h + (ncol + 1) * padding
-                            grid_w = nrow * w + (nrow + 1) * padding
-                            grid = torch.zeros((c, grid_h, grid_w), dtype=images.dtype, device=images.device)
-
-                            for idx in range(n):
-                                row = idx // nrow
-                                col = idx % nrow
-                                y = row * h + (row + 1) * padding
-                                x = col * w + (col + 1) * padding
-                                grid[:, y:y+h, x:x+w] = images[idx]
-
-                            return grid
-
                         # Prepare images for TensorBoard
-                        # Input views: [N, N_views, 3, H, W] -> reshape to [N*N_views, 3, H, W]
                         n_samples = ret.input_views.shape[0]
                         n_views = ret.input_views.shape[1]
-                        views_flat = ret.input_views.reshape(-1, 3, ret.input_views.shape[-2], ret.input_views.shape[-1])
-                        views_normalized = normalize_for_tb(views_flat)
+                        view_h, view_w = ret.input_views.shape[-2], ret.input_views.shape[-1]
+                        pano_h, pano_w = ret.gt_samples.shape[-2], ret.gt_samples.shape[-1]
 
-                        # GT and predicted panoramas: [N, 3, H_pano, W_pano]
-                        gt_normalized = normalize_for_tb(ret.gt_samples)
-                        pred_normalized = normalize_for_tb(ret.rec_samples)
+                        # Normalize all images from [-1, 1] to [0, 1]
+                        views_normalized = normalize_for_tb(ret.input_views)  # [N, N_views, 3, H, W]
+                        gt_normalized = normalize_for_tb(ret.gt_samples)      # [N, 3, H_pano, W_pano]
+                        pred_normalized = normalize_for_tb(ret.rec_samples)   # [N, 3, H_pano, W_pano]
 
-                        # Create grids for display
-                        views_grid = make_grid_torch(views_normalized, nrow=n_views, padding=2)
-                        gt_grid = make_grid_torch(gt_normalized, nrow=min(4, n_samples), padding=2)
-                        pred_grid = make_grid_torch(pred_normalized, nrow=min(4, n_samples), padding=2)
+                        # Resize panoramas to match view height for combined grid
+                        # Scale width proportionally to maintain aspect ratio
+                        pano_new_h = view_h
+                        pano_new_w = int(pano_w * (view_h / pano_h))
+                        gt_resized = torch.nn.functional.interpolate(
+                            gt_normalized, size=(pano_new_h, pano_new_w), mode='bilinear', align_corners=False
+                        )
+                        pred_resized = torch.nn.functional.interpolate(
+                            pred_normalized, size=(pano_new_h, pano_new_w), mode='bilinear', align_corners=False
+                        )
+
+                        # Create combined grid: each row = [view0, view1, ..., viewN, GT, Pred]
+                        # Total width per row = n_views * view_w + 2 * pano_new_w + (n_views + 3) * padding
+                        padding = 2
+                        n_cols = n_views + 2  # views + GT + Pred
+                        row_w = n_views * view_w + 2 * pano_new_w + (n_cols + 1) * padding
+                        row_h = view_h + 2 * padding
+                        grid_h = n_samples * row_h
+                        grid_w = row_w
+
+                        combined_grid = torch.zeros((3, grid_h, grid_w), dtype=views_normalized.dtype, device=views_normalized.device)
+
+                        for i_sample in range(n_samples):
+                            y = i_sample * row_h + padding
+                            x = padding
+
+                            # Place views
+                            for i_view in range(n_views):
+                                combined_grid[:, y:y+view_h, x:x+view_w] = views_normalized[i_sample, i_view]
+                                x += view_w + padding
+
+                            # Place GT
+                            combined_grid[:, y:y+pano_new_h, x:x+pano_new_w] = gt_resized[i_sample]
+                            x += pano_new_w + padding
+
+                            # Place Pred
+                            combined_grid[:, y:y+pano_new_h, x:x+pano_new_w] = pred_resized[i_sample]
 
                         # Add to TensorBoard Images tab
                         if self.writer:
-                            self.writer.add_image('MultiView/fisheye_views', views_grid, global_step=self.state.cur_steps)
-                            self.writer.add_image('MultiView/gt_panorama', gt_grid, global_step=self.state.cur_steps)
-                            self.writer.add_image('MultiView/pred_panorama', pred_grid, global_step=self.state.cur_steps)
-                            self.print(f"Saved multi-view images to TensorBoard Images tab")
+                            self.writer.add_image('MultiView/combined_views_gt_pred', combined_grid, global_step=self.state.cur_steps)
+                            self.print(f"Saved combined multi-view grid to TensorBoard Images tab")
 
                         # Also save a figure to disk for easy viewing
                         fig = show_multiview_result(

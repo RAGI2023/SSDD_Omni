@@ -15,6 +15,7 @@ Key differences from original SpiderTask:
 
 import os
 from copy import deepcopy
+from omegaconf import OmegaConf
 from pathlib import Path
 from typing import Any, Dict, Mapping, Optional
 
@@ -25,7 +26,7 @@ from accelerate.logging import get_logger
 from accelerate.utils import set_seed
 from tqdm import tqdm
 
-from .dataset_equi import load_equirect
+from .dataset_equi import load_equirect, load_equirect_video
 from .log.loggers import MetricLogger
 from .models.blocks.ema import EMA, EMAWrapper
 from .models.ssdd.losses import GanLoss, SSDDLosses
@@ -173,14 +174,22 @@ class SpiderTasksMultiView:
 
     def load_data(self):
         # Load multi-view dataset
-        cfg_copy = deepcopy(self.cfg.dataset)
+        # Convert to plain dict to allow pop() and modifications
+        cfg_copy = OmegaConf.to_container(self.cfg.dataset, resolve=True)
         cfg_copy['return_all_views'] = True  # Enable multi-view mode
 
-        (train_dataset, test_dataset), (self.train_loader, self.test_loader) = load_equirect(cfg_copy)
+        # Choose dataset type based on config
+        dataset_type = cfg_copy.pop('type', 'image')  # 'image' or 'video'
+
+        if dataset_type == 'video':
+            (train_dataset, test_dataset), (self.train_loader, self.test_loader) = load_equirect_video(cfg_copy)
+            self.print("Loaded EquiVideoDataset (multi-view):", {"train": train_dataset, "test": test_dataset})
+        else:
+            (train_dataset, test_dataset), (self.train_loader, self.test_loader) = load_equirect(cfg_copy)
+            self.print("Loaded EquiDataset (multi-view):", {"train": train_dataset, "test": test_dataset})
+
         self.train_loader = self.accelerator.prepare(self.train_loader)
         self.test_loader = self.accelerator.prepare_test_data(self.test_loader)
-
-        self.print("Loaded EquiDataset (multi-view):", {"train": train_dataset, "test": test_dataset})
 
     def prepare_model(
         self,
@@ -479,11 +488,13 @@ class SpiderTasksMultiView:
                 last_rec = rec_panorama
 
             # Store samples for visualization (input views + GT panorama + predicted panorama)
+            # Note: Keep all in [-1, 1] range; normalization happens in logger
             if self.cfg.show_samples and acc.is_main_process:
                 n_samples = self.cfg.show_samples
+                n_samples = min(n_samples, last_rec.shape[0])
                 eval_log.input_views = last_views[:n_samples]  # [N, N_views, 3, H, W]
-                eval_log.gt_samples = self.to_rgb(last_panorama[:n_samples])  # [N, 3, H_pano, W_pano]
-                eval_log.rec_samples = self.to_rgb(last_rec[:n_samples])  # [N, 3, H_pano, W_pano]
+                eval_log.gt_samples = last_panorama[:n_samples]  # [N, 3, H_pano, W_pano]
+                eval_log.rec_samples = last_rec[:n_samples]  # [N, 3, H_pano, W_pano]
 
         if self.training:
             self.set_train_state(True)

@@ -31,15 +31,16 @@ checkpoint_path: ${run_dir}/checkpoints
 
 
 dataset:
-  imagenet_root: /data/360SP-data
+  type: video
+  video_root: /data/360x_dataset_LR  # 需包含 train/ 和 val/ 子目录
   im_size: 128
-  batch_size: 12 
-  aug_scale: null
-  limit: null
-  num_workers: 20  # DataLoader num_workers (reduce if too many open files)
-  return_all_views: true  # Enable multi-view mode (required for SSDDMultiView)
+  batch_size: 6
+  frame_interval: 24
+  max_frames_per_video: null   # 每个视频最大帧数，null=不限制
+  num_workers: 4
+  return_all_views: true  # Enable multi-view mode
 
-  # EquiDataset UCM parameters
+  # UCM parameters
   f_pix: 220.0
   xi: 0.9
   mask_mode: inscribed
@@ -105,4 +106,4 @@ losses:
 
 # === Evaluation arguments ===
 
-show_samples: 8
+show_samples: 1
