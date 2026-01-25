@@ -449,7 +449,17 @@ class SpiderTasksMultiView:
             # Eval & checkpoint
             if (cur_epoch + 1) % cfg.training.eval_freq == 0:
                 self.task_eval()
-                save_training_state(self.state, self.checkpoint_path)
+
+                # 保存到 last/
+                last_ckpt = self.checkpoint_path / "last"
+                self.print(f"Saving checkpoint to {last_ckpt}")
+                save_training_state(self.state, last_ckpt)
+
+                # 如果是最佳分数，保存到 best/
+                if self.logger.epochs_since_best_score() == 0:
+                    best_ckpt = self.checkpoint_path / "best"
+                    self.print(f"Best {cfg.training.save_on_best} so far, saving to {best_ckpt}")
+                    save_training_state(self.state, best_ckpt)
 
             self.accelerator.wait_for_everyone()
 
