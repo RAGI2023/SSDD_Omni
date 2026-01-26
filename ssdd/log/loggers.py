@@ -129,6 +129,7 @@ class EvalResult:
 @dataclass
 class BatchResult:
     losses: dict = field(default_factory=dict)
+    z_stats: dict = field(default_factory=dict)  # z 的统计信息 (mean, std)
 
 
 ####################################################################
@@ -315,6 +316,7 @@ class MetricLogger:
     def on_batch(self, i_batch):
         yield (ret := BatchResult())
         losses = ret.losses
+        z_stats = ret.z_stats
 
         with torch.no_grad():
             # Aggregate losses
@@ -338,6 +340,13 @@ class MetricLogger:
                 self.writer.add_scalar("batch_loss/average", sum_loss, self.state.cur_steps)
                 for k, v in losses.items():
                     self.writer.add_scalar(f"batch_loss/{k}", v, self.state.cur_steps)
+
+                # Record z statistics if available (same frequency as log_freq)
+                if z_stats and i_batch % self.cfg.training.log_freq == 0:
+                    for k, v in z_stats.items():
+                        if isinstance(v, torch.Tensor):
+                            v = self.accelerator.gather(v).mean().item()
+                        self.writer.add_scalar(f"z_stats/{k}", v, self.state.cur_steps)
 
             if i_batch % self.cfg.training.log_freq == 0:
                 losses_str = " ; ".join([f"{k}={v}" for k, v in smooth_losses.items()])

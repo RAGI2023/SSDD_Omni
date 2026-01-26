@@ -347,6 +347,13 @@ class SpiderTasksMultiView:
 
         losses = ssdd_out.losses
 
+        # Compute z statistics for tensorboard logging
+        z_stats = {}
+        if ssdd_out.z is not None:
+            with torch.no_grad():
+                z_stats["z_mean"] = ssdd_out.z.mean()
+                z_stats["z_std"] = ssdd_out.z.std()
+
         # Add auxiliary losses (computed on panorama output)
         aux_losses = self.models["aux_losses"](panorama, ssdd_out.x0_pred, target_x=target_panorama)
         losses.update(aux_losses)
@@ -370,7 +377,7 @@ class SpiderTasksMultiView:
                 "t": ssdd_out.t,
             }
 
-        return losses
+        return losses, z_stats
 
     def _compute_train_gan_loss(self, batch, train_ctx):
         views, panorama = batch
@@ -384,6 +391,7 @@ class SpiderTasksMultiView:
     def _train_do_step(self, optimizer: torch.optim.Optimizer, batch: Any, train_ctx: Dict[str, Any], step_gan=False):
         acc = self.accelerator
 
+        z_stats = {}
         if step_gan:
             models = [self.models["gan"]]
             with acc.autocast():  # pylint: disable=no-member
@@ -391,7 +399,7 @@ class SpiderTasksMultiView:
         else:
             models = [self.models["ae"], self.models["aux_losses"]]
             with acc.autocast():  # pylint: disable=no-member
-                losses = self._compute_train_loss(batch, train_ctx)
+                losses, z_stats = self._compute_train_loss(batch, train_ctx)
 
         assert isinstance(losses, dict) and all(isinstance(v, torch.Tensor) for v in losses.values()), f"Losses should be a dict of tensors, got {losses}"
         assert len(losses) > 0, "No loss returned"
@@ -407,7 +415,7 @@ class SpiderTasksMultiView:
         optimizer.step()
         optimizer.zero_grad(set_to_none=True)
 
-        return {k: v.detach() for k, v in losses.items()}
+        return {k: v.detach() for k, v in losses.items()}, z_stats
 
     def task_train(self):
         cfg = self.cfg
@@ -429,7 +437,7 @@ class SpiderTasksMultiView:
 
                         # AE step
                         with self.accelerator.accumulate(*[self.models["ae"], self.models["aux_losses"]]):
-                            batch_log.losses = self._train_do_step(self.optimizer, batch, train_ctx)
+                            batch_log.losses, batch_log.z_stats = self._train_do_step(self.optimizer, batch, train_ctx)
 
                         # EMA update
                         if EMA.uses_ema(self.models["ae"]):
@@ -440,7 +448,7 @@ class SpiderTasksMultiView:
                         # GAN step
                         if "gan" in self.models:
                             with self.accelerator.accumulate(self.models["gan"]):
-                                gan_losses = self._train_do_step(self.gan_optimizer, batch, train_ctx, step_gan=True)
+                                gan_losses, _ = self._train_do_step(self.gan_optimizer, batch, train_ctx, step_gan=True)
                                 batch_log.losses.update(gan_losses)
 
                         self.accelerator.wait_for_everyone()
