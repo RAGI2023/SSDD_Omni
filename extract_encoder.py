@@ -22,7 +22,14 @@ with safe_open(input_path, framework="pt") as f:
     keys = list(f.keys())
 
     # 查找 encoder 权重（支持多种前缀）
-    encoder_prefixes = ["base_ssdd.encoder.", "encoder.", "ae.encoder."]
+    encoder_prefixes = [
+        "_orig_mod.ema.ema_model.base_ssdd.encoder.",  # EMA + compile
+        "_orig_mod.base_ssdd.encoder.",                # compile only
+        "ema.ema_model.base_ssdd.encoder.",            # EMA only
+        "base_ssdd.encoder.",                          # base
+        "encoder.",                                     # direct
+        "ae.encoder.",                                  # ae wrapper
+    ]
 
     for key in keys:
         for prefix in encoder_prefixes:
