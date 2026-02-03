@@ -34,8 +34,13 @@ with safe_open(input_path, framework="pt") as f:
     for key in keys:
         for prefix in encoder_prefixes:
             if key.startswith(prefix):
-                # 移除前缀，只保留 encoder 的权重名
-                new_key = key.replace(prefix, "")
+                # 移除前缀，但保留 "encoder." 前缀以便 VQEncoder 加载
+                if prefix == "encoder.":
+                    # 如果已经是 encoder. 前缀，直接保留
+                    new_key = key
+                else:
+                    # 否则移除长前缀，添加 "encoder." 前缀
+                    new_key = "encoder." + key.replace(prefix, "")
                 encoder_weights[new_key] = f.get_tensor(key)
                 break
 
@@ -54,6 +59,6 @@ save_file(encoder_weights, output_path)
 print(f"✅ 成功保存到 {output_path}")
 
 # 显示一些提取的权重 key
-print("\n提取的权重示例:")
+print("\n提取的权重示例 (带 encoder. 前缀):")
 for i, key in enumerate(list(encoder_weights.keys())[:5], 1):
     print(f"  {i}. {key}")
