@@ -20,6 +20,7 @@ from ...mutils.train_utils import init_weights
 from ..blocks.diag_gauss import DiagonalGaussianDistribution
 from ..model_utils import TrainStepResult
 from ..vq_encoder import VQEncoder
+from ..dinov2_encoder import DinoV2Encoder
 from .uvit import UViTDecoder
 
 
@@ -60,12 +61,33 @@ class SSDD(nn.Module):
         if not isinstance(encoder, nn.Module):
             # Check if matches pattern f?c? with regex
             assert isinstance(encoder, str)
+
+            # Pattern for VQEncoder: f{patch_size}c{z_dim}
             vqenc_cfg_re = r"^f(\d+)c(\d+)$"
             vqenc_cfg_match = re.match(vqenc_cfg_re, encoder)
+
+            # Pattern for DinoV2Encoder: dinov2_{model}_p{patch_size}_c{z_dim}
+            # Example: dinov2_vitb14_p14_c4
+            dinov2_cfg_re = r"^dinov2_(vits14|vitb14|vitl14|vitg14)(?:_reg)?_p(\d+)_c(\d+)$"
+            dinov2_cfg_match = re.match(dinov2_cfg_re, encoder)
+
             if vqenc_cfg_match:
                 patch_size = int(vqenc_cfg_match.group(1))
                 z_dim = int(vqenc_cfg_match.group(2))
                 encoder = VQEncoder.make(z_dim=z_dim, patch_size=patch_size, encoder_checkpoint=encoder_checkpoint)
+            elif dinov2_cfg_match:
+                model_variant = dinov2_cfg_match.group(1)
+                patch_size = int(dinov2_cfg_match.group(2))
+                z_dim = int(dinov2_cfg_match.group(3))
+                use_registers = '_reg' in encoder
+                model_name = f"dinov2_{model_variant}"
+                encoder = DinoV2Encoder.make(
+                    z_dim=z_dim,
+                    patch_size=patch_size,
+                    model_name=model_name,
+                    use_registers=use_registers,
+                    freeze_backbone=True
+                )
             else:
                 raise ValueError(f"Invalid encoder config: {encoder}")
 

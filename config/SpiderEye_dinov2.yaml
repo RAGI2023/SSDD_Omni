@@ -1,0 +1,120 @@
+defaults:
+  - _self_
+  - override hydra/job_logging: colorlog
+
+hydra:
+  verbose: false
+  run:
+    dir: ${run_dir}
+  sweep:
+    dir: ${run_dir}
+    subdir: multirun_${hydra:job.num}
+  job_logging:
+    handlers:
+      file:
+        filename: ${hydra:runtime.output_dir}/${hydra:job.name}.log
+
+seed: 0
+task: train
+
+# === Paths ===
+runtime_path: ${hydra:runtime.cwd}
+ckpt_dir: ${runtime_path}/runs # HAS to be absolute
+run_name: ${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+cache_dir: ${ckpt_dir}/cache
+run_dir: ${ckpt_dir}/jobs/${run_name}
+checkpoint_path: ${run_dir}/checkpoints
+
+
+# === Dataset arguments ===
+
+
+dataset:
+  imagenet_root: /data/360SP-data
+  im_size: 224  # DINOv2 works best with 224x224 or multiples of 14
+  batch_size: 2  # Minimum recommended (was 1, too small)
+  aug_scale: null
+  limit: null
+  num_workers: 20  # DataLoader num_workers (reduce if too many open files)
+  return_all_views: true  # Enable multi-view mode (required for SSDDMultiView)
+
+  # EquiDataset UCM parameters
+  f_pix: 220.0
+  xi: 0.85
+  mask_mode: inscribed
+
+  # UCM jitter parameters (for data augmentation during training)
+  # Only applied to training split; validation uses no jitter
+  xi_jitter: 0.0        # xi扰动范围: xi * (1 ± xi_jitter), 0表示不扰动
+  f_jitter: 0.0         # f_pix扰动范围: f_pix / (1 ± f_jitter), 0表示不扰动
+  jitter_target: both   # "xi" | "f" | "both" - 扰动目标
+
+# === Model arguments ===
+
+distill_teacher: false
+ssdd:
+  compile: false  # Disabled to reduce memory fragmentation
+  checkpoint: null
+
+  # DINOv2 encoder configuration
+  # Format: dinov2_{model}_p{patch_size}_c{z_dim}
+  # Models: vits14, vitb14, vitl14, vitg14
+  # Use _reg suffix for models with registers (e.g., dinov2_vitb14_reg_p14_c4)
+  encoder: dinov2_vitb14_p14_c4  # ViT-B/14 with patch_size=14, z_dim=4
+  encoder_checkpoint: null  # Not needed for DINOv2 (loads from torch.hub)
+  encoder_train: false  # DINOv2 backbone is frozen by default
+
+  decoder: S  # Changed from M to S to reduce memory usage
+  decoder_image_size: [448, 224]  # Output panorama size (W, H) - 2:1 aspect ratio
+                                  # Must be divisible by patch_size (14)
+
+  # Multi-view specific parameters
+  n_views: 4
+  fusion_type: concat_conv  # Changed from attention to reduce memory usage
+  fusion_hidden_dim: null   # Optional: override default (z_dim * 2)
+
+  # View Encoding parameters
+  use_view_encoding: true        # Enable view encoding (strongly recommended)
+  view_encoding_type: sinusoidal  # "learnable" | "sinusoidal" | "directional"
+
+  fm_sampler:
+    steps: 12
+    t_pow_shift: 2.0
+
+  ema:
+    decay: 0.999
+    start_iter: 50_000
+
+
+aux_losses:
+  compile: ${ssdd.compile}
+  repa:
+    i_extract: 4
+    n_layers: 2
+  lpips: false  # Temporarily disabled due to VGG16 download issues
+
+
+# === Training arguments ===
+
+training:
+  mixed_precision: bf16
+  grad_accumulate: 6  # 2 × 6 = 12 effective batch size
+  grad_clip: 0.1
+  epochs: 300
+  eval_freq: 1
+  save_on_best: FID
+  log_freq: 200
+  lr: 8e-4
+  weight_decay: 1e-2
+
+losses:
+  diffusion: 1
+  repa: 0.0
+  lpips: 0.5
+  kl: 1e-6  # KL loss will be 0 since DINOv2 output is deterministic
+
+
+# === Evaluation arguments ===
+
+show_samples: 8

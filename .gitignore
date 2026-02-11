@@ -21,3 +21,4 @@ imagenet_data/
 *.jpeg
 
 tensorboard_logs/
+.claude
